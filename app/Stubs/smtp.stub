@@ -1,0 +1,11 @@
+    connectivity-smtp:
+        image: axllent/mailpit:latest
+        container_name: connectivity_smtp
+        restart: unless-stopped
+        ports:
+            - '${FORWARD_MAILPIT_PORT:-1030}:1025'
+            - '${FORWARD_MAILPIT_DASHBOARD_PORT:-8030}:8025'
+        environment:
+            TZ: 'Europe/Berlin'
+        networks:
+            - default

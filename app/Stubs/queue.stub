@@ -1,0 +1,16 @@
+    connectivity-queue:
+        image: connectivity/php:8.4-alpine
+        build:
+            context: ./
+            dockerfile: docker-local/php/Dockerfile
+        restart: unless-stopped
+        container_name: connectivity_queue
+        working_dir: /app
+        command: [ "php", "artisan", "queue:listen", "--tries=3" ]
+        depends_on:
+            connectivity-app:
+                condition: service_started
+        volumes:
+            - ./:/app
+        networks:
+            - default

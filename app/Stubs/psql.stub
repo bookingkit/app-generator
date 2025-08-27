@@ -1,0 +1,19 @@
+    connectivity-psql:
+        image: postgres:17-alpine
+        container_name: connectivity_psql
+        restart: unless-stopped
+        ports:
+            - "${FORWARD_PORT_DB:-5432}:5432"
+        environment:
+            PGPASSWORD: '${DB_PASSWORD:-password}'
+            POSTGRES_USER: "${DB_USERNAME:-connectivity}"
+            POSTGRES_PASSWORD: "${DB_PASSWORD:-password}"
+            POSTGRES_DB: "${DB_DATABASE:-connectivity}"
+        volumes:
+            - 'connectivity-psql:/var/lib/postgresql/data'
+        healthcheck:
+            test: [ "CMD", "pg_isready", "-q", "-d", "${DB_DATABASE}", "-U", "${DB_USERNAME}" ]
+            retries: 3
+            timeout: 5s
+        networks:
+            - default

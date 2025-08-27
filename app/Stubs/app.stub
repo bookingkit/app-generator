@@ -1,0 +1,24 @@
+services:
+
+    connectivity-app:
+        working_dir: /app
+        build:
+            context: ./
+            dockerfile: docker-local/php/Dockerfile
+        image: connectivity/php:8.4-alpine
+        container_name: connectivity_app
+        restart: unless-stopped
+        env_file:
+            - .env
+        volumes:
+            - ./:/app
+            - ${BOOKINGKIT_ROOT:-../bookingkit}/docker-data/certs:/certs:ro
+        command: >
+            sh -c "cp /certs/rootCA.crt /usr/local/share/ca-certificates/rootCA.crt &&
+            update-ca-certificates &&
+            composer install &&
+            php artisan serve --host=0.0.0.0"
+        ports:
+            - "${FORWARD_PORT_APP:-8020}:8000"
+        networks:
+            - default

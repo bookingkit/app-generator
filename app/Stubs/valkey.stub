@@ -1,0 +1,14 @@
+    connectivity-valkey:
+        image: 'valkey/valkey:alpine'
+        container_name: connectivity_valkey
+        restart: unless-stopped
+        ports:
+            - "${FORWARD_PORT_REDIS:-6379}:6379"
+        volumes:
+            - 'connectivity-valkey:/data'
+        healthcheck:
+            test: [ "CMD", "valkey-cli", "ping" ]
+            retries: 3
+            timeout: 5s
+        networks:
+            - default

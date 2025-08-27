@@ -1,0 +1,19 @@
+    connectivity-mysql:
+        image: mariadb:10.5.8
+        container_name: connectivity_mysql
+        restart: unless-stopped
+        ports:
+            - "${FORWARD_PORT_DB:-3025}:3306"
+        environment:
+            MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-password}
+            MYSQL_DATABASE: ${DB_DATABASE:-connectivity}
+            MYSQL_USER: ${DB_USERNAME:-connectivity}
+            MYSQL_PASSWORD: ${DB_PASSWORD:-password}
+        volumes:
+            - 'connectivity-mysql:/var/lib/mysql:rw'
+        healthcheck:
+            test: ["CMD", "mysqladmin", "ping", "-p${DB_PASSWORD}"]
+            retries: 3
+            timeout: 5s
+        networks:
+            - default
