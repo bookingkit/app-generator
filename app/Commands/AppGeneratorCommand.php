@@ -37,28 +37,108 @@ class AppGeneratorCommand extends Command
 
         $selectedServices = $this->selectServices();
 
-        $useBookingkitNetwork = $this->confirmBookingkitNetwork();
+        $networkConfig = $this->confirmBookingkitNetwork($projectName);
 
-        $this->createProject($projectName, $selectedServices, $useBookingkitNetwork);
+        $bookingkitRoot = $this->getBookingkitRoot();
+
+        $this->createProject($projectName, $selectedServices, $networkConfig, $bookingkitRoot);
     }
 
     /**
-     * Confirm if user wants to connect to bookingkit network.
+     * Get the BOOKINGKIT_ROOT path from user input.
      */
-    private function confirmBookingkitNetwork(): bool
+    private function getBookingkitRoot(): string
     {
         $this->line('');
-        return confirm(
+        $bookingkitRoot = text(
+            label: 'Enter the path to your bookingkit project',
+            placeholder: '/Users/Arun/Developer/newBK/bookingkit-local',
+            default: '/Users/Arun/Developer/newBK/bookingkit-local',
+            hint: 'This should point to your bookingkit project directory containing docker-compose.dev.yml'
+        );
+
+        // Validate the path
+        if (!is_dir($bookingkitRoot)) {
+            $this->warn("⚠️  Warning: The directory '{$bookingkitRoot}' does not exist.");
+            $confirm = $this->choice(
+                'Do you want to continue anyway?',
+                ['No', 'Yes'],
+                0
+            );
+            
+            if ($confirm === 'No') {
+                return $this->getBookingkitRoot();
+            }
+        }
+
+        // Check if it contains bookingkit files
+        if (is_dir($bookingkitRoot) && !file_exists($bookingkitRoot . '/docker-compose.dev.yml')) {
+            $this->warn("⚠️  Warning: 'docker-compose.dev.yml' not found in '{$bookingkitRoot}'.");
+            $this->warn("This might not be a valid bookingkit project directory.");
+            $confirm = $this->choice(
+                'Do you want to continue anyway?',
+                ['No', 'Yes'],
+                0
+            );
+            
+            if ($confirm === 'No') {
+                return $this->getBookingkitRoot();
+            }
+        }
+
+        // Validate that the path ends with 'bookingkit-local'
+        if (!str_ends_with($bookingkitRoot, 'bookingkit-local')) {
+            $this->warn("⚠️  Warning: The path should end with 'bookingkit-local'.");
+            $this->warn("Expected format: /path/to/bookingkit-local");
+            $this->warn("Current path: {$bookingkitRoot}");
+            
+            $confirm = $this->choice(
+                'Do you want to continue anyway?',
+                ['No', 'Yes'],
+                0
+            );
+            
+            if ($confirm === 'No') {
+                return $this->getBookingkitRoot();
+            }
+        }
+
+        return $bookingkitRoot;
+    }
+
+    /**
+     * Confirm if user wants to connect to bookingkit network and get custom domain.
+     */
+    private function confirmBookingkitNetwork(string $projectName): array
+    {
+        $this->line('');
+        $useBookingkitNetwork = confirm(
             label: 'Do you want to connect to the bookingkit network?',
             default: true,
-            hint: 'If yes, will use external bookingkit-network. If no, will create project-specific network.'
+            hint: 'If yes, will use external bookingkit-network and Traefik. If no, will create project-specific network.'
         );
+        
+        $customDomain = null;
+        if ($useBookingkitNetwork) {
+            $this->line('');
+            $defaultDomain = $projectName . '.bookingkit.test';
+            $customDomain = text(
+                label: 'Enter custom domain for your application',
+                default: $defaultDomain,
+                hint: 'This will be used for Traefik routing (e.g., myapp.bookingkit.test)'
+            );
+        }
+        
+        return [
+            'useBookingkitNetwork' => $useBookingkitNetwork,
+            'customDomain' => $customDomain
+        ];
     }
 
     /**
      * Create the project folder and docker-compose.yml file.
      */
-    private function createProject(string $projectName, array $selectedServices, bool $useBookingkitNetwork): void
+    private function createProject(string $projectName, array $selectedServices, array $networkConfig, string $bookingkitRoot): void
     {
         $this->info("📁 Creating project folder: {$projectName}");
         
@@ -158,7 +238,7 @@ class AppGeneratorCommand extends Command
         $composeContent .= "\nnetworks:";
         $composeContent .= "\n    default:";
         
-        if ($useBookingkitNetwork) {
+        if ($networkConfig['useBookingkitNetwork']) {
             $composeContent .= "\n        name: bookingkit-network";
             $composeContent .= "\n        external: true";
         } else {
@@ -167,6 +247,16 @@ class AppGeneratorCommand extends Command
         
         // Replace placeholders
         $composeContent = $this->replacePlaceholders($composeContent, $projectName);
+        
+        // Update Traefik domain if using bookingkit network
+        if ($networkConfig['useBookingkitNetwork'] && $networkConfig['customDomain']) {
+            $customDomain = $networkConfig['customDomain'];
+            $composeContent = preg_replace(
+                '/Host\(`[^`]+`\)/',
+                "Host(`{$customDomain}`)",
+                $composeContent
+            );
+        }
         
         // Fix container names
         $projectUnderscore = str_replace('-', '_', $projectName);
@@ -195,16 +285,16 @@ class AppGeneratorCommand extends Command
         $this->info("📂 Project created in: " . realpath($projectName));
         
         // Configure .env file
-        $this->configureEnvFile($projectName, $selectedServices);
+        $this->configureEnvFile($projectName, $selectedServices, $networkConfig['customDomain'] ?? null, $bookingkitRoot);
         
         // Show final instructions
-        $this->showFinalInstructions($projectName, $selectedServices);
+        $this->showFinalInstructions($projectName, $selectedServices, $networkConfig['customDomain'] ?? null);
     }
 
     /**
      * Configure the .env file with project-specific settings.
      */
-    private function configureEnvFile(string $projectName, array $selectedServices): void
+    private function configureEnvFile(string $projectName, array $selectedServices, ?string $customDomain = null, string $bookingkitRoot): void
     {
         $this->info("⚙️  Configuring .env file...");
         
@@ -228,6 +318,12 @@ class AppGeneratorCommand extends Command
         
         // Replace APP_NAME
         $envContent = preg_replace('/APP_NAME=.*/', "APP_NAME={$projectName}", $envContent);
+        
+        // Set APP_URL if custom domain is provided
+        if ($customDomain) {
+            $appUrl = "https://{$customDomain}";
+            $envContent = preg_replace('/APP_URL=.*/', "APP_URL={$appUrl}", $envContent);
+        }
         
         // Determine database connection and host
         $dbConnection = 'mysql';
@@ -259,6 +355,9 @@ class AppGeneratorCommand extends Command
         $appKey = 'base64:' . base64_encode(random_bytes(32));
         $envContent = preg_replace('/APP_KEY=.*/', "APP_KEY={$appKey}", $envContent);
         
+        // Set BOOKINGKIT_ROOT
+        $envContent = preg_replace('/BOOKINGKIT_ROOT=.*/', "BOOKINGKIT_ROOT={$bookingkitRoot}", $envContent);
+        
         // Write updated .env file
         if (file_put_contents($envPath, $envContent) === false) {
             $this->error("❌ Failed to write .env file");
@@ -267,21 +366,188 @@ class AppGeneratorCommand extends Command
         
         $this->info("✅ .env file configured successfully!");
         $this->info("🔑 Application key generated and set automatically!");
+        $this->info("📁 BOOKINGKIT_ROOT configured: {$bookingkitRoot}");
         
-        // Show BOOKINGKIT_ROOT reminder in a prominent section
-        $this->line('');
-        $this->line('<fg=yellow>⚠️  IMPORTANT CONFIGURATION REQUIRED ⚠️</>');
-        $this->line('<fg=yellow>══════════════════════════════════════════════════════════════</>');
-        $this->line('<fg=yellow>Please update BOOKINGKIT_ROOT in .env file to the actual value!</>');
-        $this->line('<fg=yellow>This is required for the application to work properly.</>');
-        $this->line('<fg=yellow>══════════════════════════════════════════════════════════════</>');
-        $this->line('');
+        // Create configure-domain.sh script if custom domain is provided
+        if ($customDomain) {
+            $this->createConfigureDomainScript($projectName, $projectPath, $bookingkitRoot);
+        }
+    }
+
+    /**
+     * Create the configure-domain.sh script for certificate generation.
+     */
+    private function createConfigureDomainScript(string $projectName, string $projectPath, string $bookingkitRoot): void
+    {
+        $this->info("🔐 Creating configure-domain.sh script...");
+        
+        $scriptPath = $projectPath . '/configure-domain.sh';
+        $domain = $projectName . '.bookingkit.test';
+        
+        $scriptContent = <<<SCRIPT
+#!/usr/bin/env bash
+
+# Script to generate certificates for the current project domain
+# This extends the bookingkit certificate generation
+
+set -e
+
+# Get the current project name from the directory
+DOMAIN="{$domain}"
+
+# Set BOOKINGKIT_ROOT from script generation
+BOOKINGKIT_ROOT="{$bookingkitRoot}"
+
+echo "🌐 Domain: \$DOMAIN"
+echo "📁 Bookingkit Root: \$BOOKINGKIT_ROOT"
+
+# Check if bookingkit directory exists
+if [ ! -d "\$BOOKINGKIT_ROOT" ]; then
+    echo "❌ Bookingkit directory not found: \$BOOKINGKIT_ROOT"
+    echo "Please update BOOKINGKIT_ROOT in .env file to the correct path."
+    exit 1
+fi
+
+# Check if bookingkit scripts exist
+BOOKINGKIT_HOSTS_FILE="\${BOOKINGKIT_ROOT}/hosts.txt"
+BOOKINGKIT_GENERATE_SCRIPT="\${BOOKINGKIT_ROOT}/scripts/generate-certificates.sh"
+BOOKINGKIT_INJECT_SCRIPT="\${BOOKINGKIT_ROOT}/scripts/inject-hosts.sh"
+
+if [ ! -f "\$BOOKINGKIT_HOSTS_FILE" ]; then
+    echo "❌ Bookingkit hosts.txt not found: \$BOOKINGKIT_HOSTS_FILE"
+    exit 1
+fi
+
+if [ ! -f "\$BOOKINGKIT_GENERATE_SCRIPT" ]; then
+    echo "❌ Bookingkit generate-certificates.sh not found: \$BOOKINGKIT_GENERATE_SCRIPT"
+    exit 1
+fi
+
+if [ ! -f "\$BOOKINGKIT_INJECT_SCRIPT" ]; then
+    echo "❌ Bookingkit inject-hosts.sh not found: \$BOOKINGKIT_INJECT_SCRIPT"
+    exit 1
+fi
+
+echo "✅ All bookingkit files found"
+
+# Step 1: Temporarily add domain to bookingkit hosts.txt and generate certificates
+echo ""
+echo "🔐 Step 1: Generating certificates using bookingkit scripts"
+
+# Check if domain already exists in bookingkit hosts.txt
+if grep -q "^\${DOMAIN}\$" "\$BOOKINGKIT_HOSTS_FILE"; then
+    echo "✅ Domain \$DOMAIN already exists in bookingkit hosts.txt"
+    DOMAIN_ALREADY_EXISTS=true
+else
+    echo "➕ Temporarily adding \$DOMAIN to bookingkit hosts.txt"
+    echo "\$DOMAIN" >> "\$BOOKINGKIT_HOSTS_FILE"
+    DOMAIN_ALREADY_EXISTS=false
+fi
+
+# Generate certificates using bookingkit script
+echo "📜 Generating certificates..."
+cd "\$BOOKINGKIT_ROOT"
+bash scripts/generate-certificates.sh
+cd - > /dev/null
+
+# Remove the domain from bookingkit hosts.txt if we added it
+if [ "\$DOMAIN_ALREADY_EXISTS" = false ]; then
+    echo "🗑️  Removing \$DOMAIN from bookingkit hosts.txt"
+    sed -i.bak "/^\${DOMAIN}\$/d" "\$BOOKINGKIT_HOSTS_FILE"
+    rm -f "\$BOOKINGKIT_HOSTS_FILE.bak"
+    echo "✅ Domain removed from bookingkit hosts.txt"
+fi
+
+echo "✅ Certificates generated using bookingkit scripts"
+
+# Step 2: Add domain to /etc/hosts if not already present
+echo ""
+echo "📋 Step 2: Adding domain to /etc/hosts"
+if grep -q "\$DOMAIN" /etc/hosts; then
+    echo "✅ Domain \$DOMAIN already exists in /etc/hosts"
+else
+    echo "➕ Adding \$DOMAIN to /etc/hosts"
+    echo "127.0.0.1 \$DOMAIN" | sudo tee -a /etc/hosts > /dev/null
+    echo "✅ Domain added to /etc/hosts"
+fi
+
+# Step 3: Restart Traefik to pick up new certificates
+echo ""
+echo "🔄 Step 3: Restarting Traefik to pick up new certificates"
+TRAEFIK_CONTAINER=\$(docker ps --filter "name=traefik" --format "{{.Names}}")
+if [ -n "\$TRAEFIK_CONTAINER" ]; then
+    echo "📦 Restarting Traefik container: \$TRAEFIK_CONTAINER"
+    docker restart "\$TRAEFIK_CONTAINER"
+    echo "✅ Traefik restarted successfully"
+    
+    # Wait a moment for Traefik to fully restart
+    echo "⏳ Waiting for Traefik to fully restart..."
+    sleep 5
+else
+    echo "⚠️  Traefik container not found. Please restart it manually:"
+    echo "   docker restart traefik"
+fi
+
+# Step 4: Verify the domain is accessible
+echo ""
+echo "🔍 Step 4: Verifying domain resolution"
+if grep -q "\$DOMAIN" /etc/hosts; then
+    echo "✅ Domain \$DOMAIN found in /etc/hosts"
+else
+    echo "❌ Domain \$DOMAIN not found in /etc/hosts"
+    echo "Please add it manually: echo '127.0.0.1 \$DOMAIN' | sudo tee -a /etc/hosts"
+fi
+
+# Step 5: Verify certificate is being used
+echo ""
+echo "🔍 Step 5: Verifying certificate usage"
+echo "📜 Checking certificate for \$DOMAIN..."
+CERT_INFO=\$(echo | openssl s_client -connect "\$DOMAIN:443" -servername "\$DOMAIN" 2>/dev/null | openssl x509 -noout -subject 2>/dev/null || echo "Failed to get certificate")
+echo "📋 Certificate subject: \$CERT_INFO"
+
+if echo "\$CERT_INFO" | grep -q "mkcert"; then
+    echo "✅ Using mkcert certificate (correct)"
+else
+    echo "⚠️  Not using mkcert certificate"
+    echo "   This might indicate Traefik is still using default certificate"
+    echo "   Please check Traefik configuration and restart again if needed"
+fi
+
+echo ""
+echo "🎉 Certificate generation and configuration complete!"
+echo ""
+echo "📋 Summary:"
+echo "   Domain: \$DOMAIN"
+echo "   Certificates: \$PROJECT_CERTS_DIR"
+echo "   Traefik: Restarted to pick up new certificates"
+echo ""
+echo "🌐 You can now access your application at:"
+echo "   https://\$DOMAIN"
+echo ""
+echo "⚠️  Note: You may need to restart your project containers for the certificates to take effect:"
+echo "   docker-compose down && docker-compose up -d"
+SCRIPT;
+
+        // Write the script file
+        if (file_put_contents($scriptPath, $scriptContent) === false) {
+            $this->error("❌ Failed to create configure-domain.sh script");
+            return;
+        }
+        
+        // Make the script executable
+        if (!chmod($scriptPath, 0755)) {
+            $this->error("❌ Failed to make configure-domain.sh executable");
+            return;
+        }
+        
+        $this->info("✅ configure-domain.sh script created and made executable!");
+        $this->info("🔐 Run './configure-domain.sh' to generate SSL certificates for your domain");
     }
 
     /**
      * Show final setup instructions with selected services table.
      */
-    private function showFinalInstructions(string $projectName, array $selectedServices): void
+    private function showFinalInstructions(string $projectName, array $selectedServices, ?string $customDomain = null): void
     {
         $this->line('');
         $this->line('<fg=green>══════════════════════════════════════════════════════════════</>');
@@ -293,26 +559,48 @@ class AppGeneratorCommand extends Command
         $this->line('1. 📁 Navigate to your project directory:');
         $this->line("   <fg=yellow>cd {$projectName}</>");
         
-        $this->line('');
-        $this->line('2. 🐳 Start the bookingkit containers first:');
-        $this->line('   <fg=yellow>docker-compose -f /path/to/bookingkit/docker-compose.yml up -d</>');
+        if ($customDomain) {
+            $this->line('');
+            $this->line('2. 🔐 Generate SSL certificates for your domain:');
+            $this->line('   <fg=yellow>./configure-domain.sh</>');
+            $this->line('   <fg=gray>💡 This will add your domain to bookingkit hosts.txt, generate certificates, and update /etc/hosts</>');
+            
+            $this->line('');
+            $this->line('3. 🐳 Start the bookingkit containers first (required for Traefik):');
+            $this->line('   <fg=yellow>docker-compose -f /path/to/bookingkit/docker-compose.dev.yml up -d</>');
+        } else {
+            $this->line('');
+            $this->line('2. 🐳 Start the bookingkit containers first:');
+            $this->line('   <fg=yellow>docker-compose -f /path/to/bookingkit/docker-compose.yml up -d</>');
+        }
         
         $this->line('');
-        $this->line('3. 🚀 Start the Docker containers:');
+        $this->line('4. 🚀 Start the Docker containers:');
         $this->line('   <fg=yellow>docker-compose up -d</>');
         
         $this->line('');
-        $this->line('4. 🗄️  Run database migrations:');
+        $this->line('5. 🗄️  Run database migrations:');
         $this->line('   <fg=yellow>docker-compose exec app php artisan migrate</>');
         
         $this->line('');
         $this->line('<fg=cyan>🌐 Access your application:</>');
-        $this->line('   <fg=green>📱 Main Application:</> http://localhost:8020');
+        
+        if ($customDomain) {
+            $this->line("   <fg=green>📱 Main Application:</> https://{$customDomain}");
+            $this->line('   <fg=yellow>💡 Using Traefik with SSL certificate</>');
+            $this->line('   <fg=gray>💡 APP_URL has been set to https://{$customDomain} in .env file</>');
+        } else {
+            $this->line('   <fg=green>📱 Main Application:</> http://localhost:8020');
+        }
         
         // Show additional URLs based on selected services
         foreach ($selectedServices as $service) {
             if ($service === 'smtp') {
-                $this->line('   <fg=green>📧 Mailpit Dashboard:</> http://localhost:8030');
+                if ($customDomain) {
+                    $this->line("   <fg=green>📧 Mailpit Dashboard:</> https://mail.{$customDomain}");
+                } else {
+                    $this->line('   <fg=green>📧 Mailpit Dashboard:</> http://localhost:8030');
+                }
             }
         }
         

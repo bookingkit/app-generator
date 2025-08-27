@@ -18,7 +18,14 @@ services:
             update-ca-certificates &&
             composer install &&
             php artisan serve --host=0.0.0.0"
-        ports:
-            - "${FORWARD_PORT_APP:-8020}:8000"
+        # Comment out ports when using Traefik
+        # ports:
+        #     - "${FORWARD_PORT_APP:-8020}:8000"
+        labels:
+            - "traefik.enable=true"
+            - "traefik.http.routers.connectivity-app.rule=Host(`connectivity.bookingkit.test`)"
+            - "traefik.http.routers.connectivity-app.entrypoints=websecure"
+            - "traefik.http.routers.connectivity-app.tls=true"
+            - "traefik.http.services.connectivity-app.loadbalancer.server.port=8000"
         networks:
             - default
