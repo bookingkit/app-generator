@@ -13,7 +13,7 @@ permissions:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -34,10 +34,10 @@ jobs:
       run: |
         echo "🔨 Building application..."
         php app-generator app:build app-generator --build-version=${{ github.sha }}
-        
+
         echo "📁 Checking build output..."
         ls -la builds/
-        
+
         echo "🔍 Checking if PHAR file exists and is valid..."
         if [ -f "builds/app-generator" ]; then
           echo "✅ PHAR file exists"
@@ -56,10 +56,10 @@ jobs:
         else
           CURRENT_VERSION="0.0.1"
         fi
-        
+
         # Parse version components
         IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-        
+
         # Increment patch version, handle overflow
         NEW_PATCH=$((PATCH + 1))
         if [ $NEW_PATCH -gt 20 ]; then
@@ -76,7 +76,7 @@ jobs:
           NEW_MAJOR=$MAJOR
         fi
         NEW_VERSION="$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
-        
+
         echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
         echo "Current version: $CURRENT_VERSION"
         echo "New version: $NEW_VERSION"
@@ -94,7 +94,7 @@ jobs:
           echo "❌ PHAR file not found!"
           exit 1
         fi
-        
+
         # Check if file starts with PHP shebang or PHAR magic
         FIRST_LINE=$(head -1 builds/app-generator)
         if [[ "$FIRST_LINE" == *"<?php"* ]] || [[ "$FIRST_LINE" == *"#!/usr/bin/env php"* ]]; then
@@ -104,10 +104,10 @@ jobs:
           echo "First line: $FIRST_LINE"
           exit 1
         fi
-        
+
         # Make sure it's executable
         chmod +x builds/app-generator
-        
+
         # Test the PHAR file
         echo "🧪 Testing PHAR file..."
         ./builds/app-generator --version || ./builds/app-generator --help || echo "PHAR file test completed"
@@ -120,20 +120,20 @@ jobs:
         gh release create v${{ steps.version.outputs.version }} \
           --title "Release v${{ steps.version.outputs.version }}" \
           --notes "## 🚀 Release v${{ steps.version.outputs.version }}
-        
+
         ### 📦 Download
-        
+
         #### Latest Version
         \`\`\`bash
         # Get latest version
         LATEST_VERSION=\$(curl -s https://raw.githubusercontent.com/${{ github.repository }}/main/latest-version.txt)
-        
+
         # Download binary
         curl -L \"https://github.com/${{ github.repository }}/releases/download/v\$LATEST_VERSION/app-generator\" -o app-generator
         chmod +x app-generator
         ./app-generator
         \`\`\`
-        
+
         #### Direct Download
         Download the binary directly: [app-generator](https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/app-generator)" \
           ./builds/app-generator \
@@ -149,7 +149,7 @@ jobs:
           -H "Authorization: token ${{ github.token }}" \
           -H "Accept: application/vnd.github.v3+json" \
           "https://api.github.com/repos/${{ github.repository }}/releases/latest")
-        
+
         # Check if the response contains an error (release doesn't exist)
         if echo "$LATEST_RELEASE_RESPONSE" | jq -e '.message' > /dev/null 2>&1; then
           echo "ℹ️  No existing latest release found (this is normal for first run)"
@@ -162,55 +162,55 @@ jobs:
                 -H "Authorization: token ${{ github.token }}" \
                 -H "Accept: application/vnd.github.v3+json" \
                 "https://api.github.com/repos/${{ github.repository }}/releases/$LATEST_RELEASE_ID")
-              
+
               if [ $? -eq 0 ]; then
                 echo "✅ Latest release deleted successfully"
               else
                 echo "⚠️  Warning: Could not delete latest release, but continuing..."
               fi
-              
+
               # Also delete the "latest" tag using multiple methods
               echo "🏷️  Deleting latest tag..."
-              
+
               # Method 1: Try GitHub API
               TAG_DELETE_RESPONSE=$(curl -s \
                 -X DELETE \
                 -H "Authorization: token ${{ github.token }}" \
                 -H "Accept: application/vnd.github.v3+json" \
                 "https://api.github.com/repos/${{ github.repository }}/git/refs/tags/latest")
-              
+
               # Method 2: Try GitHub CLI if API fails
               if [ $? -ne 0 ]; then
                 echo "🔄 Trying GitHub CLI to delete tag..."
                 gh api repos/${{ github.repository }}/git/refs/tags/latest -X DELETE || true
               fi
-              
+
               # Method 3: Force delete using git commands
               echo "🔄 Trying git commands to delete tag..."
               git tag -d latest || true
               git push origin :refs/tags/latest || true
-              
+
               echo "✅ Tag deletion attempts completed"
             else
               echo "ℹ️  No valid latest release ID found"
             fi
         fi
-        
+
         # Verify tag is deleted before creating new release
         echo "🔍 Verifying latest tag is deleted..."
         sleep 2  # Give GitHub API time to process deletion
-        
+
         TAG_CHECK_RESPONSE=$(curl -s \
           -H "Authorization: token ${{ github.token }}" \
           -H "Accept: application/vnd.github.v3+json" \
           "https://api.github.com/repos/${{ github.repository }}/git/refs/tags/latest")
-        
+
         if echo "$TAG_CHECK_RESPONSE" | jq -e '.message' > /dev/null 2>&1; then
           echo "✅ Latest tag is confirmed deleted"
         else
           echo "⚠️  Latest tag may still exist, but continuing..."
         fi
-        
+
         # Create new latest release
         echo "🚀 Creating new latest release..."
         LATEST_CREATE_RESPONSE=$(curl -s \
@@ -220,17 +220,17 @@ jobs:
           -H "Content-Type: application/json" \
           -d "{
             \"tag_name\": \"latest\",
-            \"name\": \"Latest Release v${{ steps.version.outputs.version }}\",
+            \"name\": \"v${{ steps.version.outputs.version }}\",
             \"body\": \"Latest version of app-generator CLI tool.\",
             \"draft\": false,
             \"prerelease\": false
           }" \
           "https://api.github.com/repos/${{ github.repository }}/releases")
-        
+
         # Check if latest release creation was successful
         if echo "$LATEST_CREATE_RESPONSE" | jq -e '.upload_url' > /dev/null 2>&1; then
           LATEST_UPLOAD_URL=$(echo "$LATEST_CREATE_RESPONSE" | jq -r '.upload_url' | sed 's/{?name,label}//')
-          
+
           # Upload asset to latest release
           echo "📤 Uploading asset to latest release..."
           UPLOAD_RESPONSE=$(curl -s \
@@ -240,7 +240,7 @@ jobs:
             -H "Content-Type: application/octet-stream" \
             --data-binary @./builds/app-generator \
             "$LATEST_UPLOAD_URL?name=app-generator")
-          
+
           if [ $? -eq 0 ]; then
             echo "✅ Latest release created and asset uploaded successfully!"
           else
@@ -257,4 +257,4 @@ jobs:
         echo "🎉 Release v${{ steps.version.outputs.version }} created successfully!"
         echo "📥 Versioned Download URL: https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/app-generator"
         echo "🔄 Latest Download URL: https://github.com/${{ github.repository }}/releases/download/latest/app-generator"
-        echo "📋 Latest version: https://raw.githubusercontent.com/${{ github.repository }}/main/latest-version.txt" 
+        echo "📋 Latest version: https://raw.githubusercontent.com/${{ github.repository }}/main/latest-version.txt"
