@@ -9,7 +9,7 @@ A Laravel Zero console application that generates connectivity application templ
 #### Always Latest Version (Recommended)
 ```bash
 # Download the latest version (URL never changes)
-curl -L "https://github.com/ap-bookingkit/app-generator/releases/download/latest/app-generator" -o app-generator
+curl -L "https://github.com/bookingkit/app-generator/releases/download/latest/app-generator" -o app-generator
 chmod +x app-generator
 ./app-generator
 ```
